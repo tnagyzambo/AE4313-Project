@@ -1,0 +1,9 @@
+[package]
+name = "solver"
+version = "0.1.0"
+edition = "2021"
+authors = ["tnagyzambo"]
+
+[dependencies]
+csv = "1.2.0"
+nalgebra = {version = "0.32.1", features = ["serde-serialize"]}
