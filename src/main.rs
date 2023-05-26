@@ -1,22 +1,45 @@
 extern crate nalgebra as na;
 
 use anyhow::Result;
-use na::{Quaternion, SMatrix, SVector};
+use na::{Quaternion, SMatrix, SVector, UnitQuaternion};
 use tracing::{event, Level};
 use tracing_subscriber;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
+    let t_orbit = 5926.0;
+    let n_orbit = 3.0;
     let t_start = 0.0;
-    let t_end = 100.0;
+    let t_end = t_orbit * n_orbit;
     let dt_0 = 0.1;
     let dt_control = 10.0;
-    let x_0 = SVector::from([0.0, 0.0, 0.0, 1.0, 0.1, 0.1, 0.0]);
+    let r_0 = UnitQuaternion::from_euler_angles(0.0, -15.0, 0.0)
+        .transform_vector(&SVector::<f64, 3>::new(7078.0e3, 0.0, 0.0)); // Initial orbital position
+    let v_0 = UnitQuaternion::from_euler_angles(0.0, -15.0, 0.0)
+        .transform_vector(&SVector::<f64, 3>::new(0.0, 7.5043e3, 0.0)); // Initial orbital velocity
+    let q_0 = UnitQuaternion::from_euler_angles(10.0, 10.0, 10.0); // Initial satellite attitude
+    let w_0 = SVector::<f64, 3>::new(0.0, 0.0, 0.0); // Initial body angular velocity
+
+    let x_0 = SVector::from([
+        r_0.index(0).to_owned(),
+        r_0.index(1).to_owned(),
+        r_0.index(2).to_owned(),
+        v_0.index(0).to_owned(),
+        v_0.index(1).to_owned(),
+        v_0.index(2).to_owned(),
+        q_0.i,
+        q_0.j,
+        q_0.k,
+        q_0.w,
+        w_0.index(0).to_owned(),
+        w_0.index(1).to_owned(),
+        w_0.index(2).to_owned(),
+    ]);
     let mut t = t_start;
     let mut t_prev_control_step = t_start;
 
-    let mut solver = RK45 {
+    let solver = RK45 {
         dt_min: 1E-10,
         dt_max: dt_control,
         tol: 1E-10,
@@ -30,16 +53,14 @@ fn main() -> Result<()> {
 
     let mut wtr = csv::Writer::from_path("out.csv")?;
     wtr.write_record(&[
-        "time (s)", "q1", "q2", "q3", "q0", "w1", "w2", "w3", "q1_hat", "q2_hat", "q3_hat",
-        "q4_hat", "w1_hat", "w2_hat", "w3_hat", "u1", "u2", "u3",
+        "t", "x", "y", "z", "v1", "v2", "v3", "q1", "q2", "q3", "q0", "w1", "w2", "w3", "q1_lvlh",
+        "q2_lvlh", "q3_lvlh", "q0_lvlh", "w1_lvlh", "w2_lvlh", "w3_lvlh", "obv", "u1", "u2", "u3",
     ])?;
-
-    // First step with initial conditions
-    let mut x_obv = observer.step(x_0);
+    let mut x_obv = observer.step(SVector::<f64, 1>::new(0.0));
     let mut u = controller.step(x_obv);
-    let (mut x, mut dt) = solver.step(x_0, u, combined, t, dt_0)?;
-    t = t + dt;
-    wtr.serialize((t, x, x_obv, u))?;
+    let mut x = x_0;
+    let mut dt = dt_0;
+    wtr.serialize((t, x, lvlh(x), x_obv, u))?;
 
     // Loop
     while t < t_end {
@@ -50,48 +71,94 @@ fn main() -> Result<()> {
         if (t + dt) > t_next_control_step {
             (x, dt) = solver.step_to(x, u, combined, t, t_next_control_step);
             t = t + dt;
-            x_obv = observer.step(x);
+            x_obv = observer.step(SVector::<f64, 1>::new(0.0));
             u = controller.step(x_obv);
             t_prev_control_step = t;
         } else {
             t = t + dt;
-            (x, dt) = (x_new, dt_new);
+            // A step_to with dt = 0.0 blows up the next interation
+            // Cannot use dt from forced step
+            //(x, dt) = (x_new, dt_new);
+            x = x_new;
         }
+        dt = dt_new;
 
-        wtr.serialize((t, x, x_obv, u))?;
+        wtr.serialize((t, x, lvlh(x), x_obv, u))?;
     }
 
     wtr.flush()?;
     Ok(())
 }
 
-fn combined(x: SVector<f64, 7>, u: SVector<f64, 3>) -> SVector<f64, 7> {
-    let q = Quaternion::from([
+fn combined(x: SVector<f64, 13>, u: SVector<f64, 3>) -> SVector<f64, 13> {
+    let r = SVector::<f64, 3>::from([
         x.index(0).to_owned(),
         x.index(1).to_owned(),
         x.index(2).to_owned(),
-        x.index(3).to_owned(),
     ]);
-    let omega = SVector::<f64, 3>::from([
+    let v = SVector::<f64, 3>::from([
+        x.index(3).to_owned(),
         x.index(4).to_owned(),
         x.index(5).to_owned(),
+    ]);
+    let q = Quaternion::from([
         x.index(6).to_owned(),
+        x.index(7).to_owned(),
+        x.index(8).to_owned(),
+        x.index(9).to_owned(),
+    ]);
+    let w = SVector::<f64, 3>::from([
+        x.index(10).to_owned(),
+        x.index(11).to_owned(),
+        x.index(12).to_owned(),
     ]);
 
-    let q_dot = kinematics(q, omega);
-    let omega_dot = dynamics(omega, u);
+    let r_dot = orbit_kinematics(r, v);
+    let v_dot = orbit_dynamics(r, v);
+    let q_dot = attitude_kinematics(q, w);
+    let w_dot = attitude_dynamics(q, w, r, u);
 
-    let x_dot = SVector::<f64, 7>::from([
+    let x_dot = SVector::<f64, 13>::from([
+        r_dot.index(0).to_owned(),
+        r_dot.index(1).to_owned(),
+        r_dot.index(2).to_owned(),
+        v_dot.index(0).to_owned(),
+        v_dot.index(1).to_owned(),
+        v_dot.index(2).to_owned(),
         q_dot.i,
         q_dot.j,
         q_dot.k,
         q_dot.w,
-        omega_dot.index(0).to_owned(),
-        omega_dot.index(1).to_owned(),
-        omega_dot.index(2).to_owned(),
+        w_dot.index(0).to_owned(),
+        w_dot.index(1).to_owned(),
+        w_dot.index(2).to_owned(),
     ]);
 
     return x_dot;
+}
+
+/// Orbit kinematics
+///
+/// # Arguments
+///
+/// * r - Orbital position (inertial)
+/// * v - Orbital velocity (inertial)
+fn orbit_kinematics(r: SVector<f64, 3>, v: SVector<f64, 3>) -> SVector<f64, 3> {
+    let w = r.cross(&v) / r.norm_squared();
+
+    return w.cross(&r);
+}
+
+/// Orbit dynamics
+///
+/// # Arguments
+///
+/// * r - Orbital postion (intertial)
+/// * v - Orbital velocity (inertial)
+fn orbit_dynamics(r: SVector<f64, 3>, v: SVector<f64, 3>) -> SVector<f64, 3> {
+    let w = r.cross(&v) / r.norm_squared();
+
+    return -w.norm_squared() * r;
 }
 
 /// Satellite kinematics
@@ -99,29 +166,76 @@ fn combined(x: SVector<f64, 7>, u: SVector<f64, 3>) -> SVector<f64, 7> {
 /// # Arguments
 ///
 /// * `q` - Quaternion attitude (body relative to inertial)
-/// * `omega` - Anuglar velocity (body relative to inertial, expressed in body)
-fn kinematics(q: Quaternion<f64>, omega: SVector<f64, 3>) -> Quaternion<f64> {
-    let phi = SMatrix::<f64, 4, 4>::new(
-        0.0, omega[2], -omega[1], omega[0], //
-        -omega[2], 0.0, omega[0], omega[1], //
-        omega[1], -omega[0], 0.0, omega[2], //
-        -omega[0], -omega[1], -omega[2], 0.0,
-    );
-
-    return Quaternion::from_vector(0.5 * phi * q.as_vector());
+/// * `w` - Anuglar velocity (body relative to inertial, expressed in body)
+fn attitude_kinematics(q: Quaternion<f64>, w: SVector<f64, 3>) -> Quaternion<f64> {
+    return 0.5 * Quaternion::new(0.0, w[0], w[1], w[2]) * q;
 }
 
 /// Satellite dynamics
 ///
 /// # Arguments
 ///
-/// * `omega` - Angular velocity (body relative to inertial, expressed in body)
+/// * `q` - Quaternion attitude (body relative to inertial)
+/// * `w` - Angular velocity (body relative to inertial, expressed in body)
+/// * `r` - Orbital position (inertial)
 /// * `u` - Control torques (expressed in body)
-fn dynamics(omega: SVector<f64, 3>, u: SVector<f64, 3>) -> SVector<f64, 3> {
+fn attitude_dynamics(
+    q: Quaternion<f64>,
+    w: SVector<f64, 3>,
+    r: SVector<f64, 3>,
+    u: SVector<f64, 3>,
+) -> SVector<f64, 3> {
     let inertia =
         SMatrix::<f64, 3, 3>::from_diagonal(&SVector::<f64, 3>::new(2500.0, 2300.0, 3100.0));
 
-    return inertia.try_inverse().unwrap() * (-omega.cross(&(inertia * omega)));
+    //return inertia.try_inverse().unwrap()
+    //    * ((-w).cross(&(inertia * w)) + torque_gg(r, inertia) + torque_d());
+
+    return inertia.try_inverse().unwrap() * ((-w).cross(&(inertia * w)));
+}
+
+/// Gravity gradient torque
+///
+/// # Arguments
+///
+/// * `r` - Orbital position (inertial)
+/// * `inertia` - Spacecraft inerital matrix
+fn torque_gg(r: SVector<f64, 3>, inertia: SMatrix<f64, 3, 3>) -> SVector<f64, 3> {
+    let mu = 3.986004418E14; // Earth gravitational parameter
+
+    return (3.0 * mu / f64::powf(r.magnitude(), 3.0))
+        * (-r.normalize()).cross(&(inertia * -r.normalize()));
+}
+
+/// Disturbance torque
+fn torque_d() -> SVector<f64, 3> {
+    return SVector::<f64, 3>::new(0.001, 0.001, 0.001);
+}
+
+fn lvlh(x: SVector<f64, 13>) -> (Quaternion<f64>, SVector<f64, 3>) {
+    let r = SVector::<f64, 3>::from([
+        x.index(0).to_owned(),
+        x.index(1).to_owned(),
+        x.index(2).to_owned(),
+    ]);
+    let v = SVector::<f64, 3>::from([
+        x.index(3).to_owned(),
+        x.index(4).to_owned(),
+        x.index(5).to_owned(),
+    ]);
+    let q = Quaternion::from([
+        x.index(6).to_owned(),
+        x.index(7).to_owned(),
+        x.index(8).to_owned(),
+        x.index(9).to_owned(),
+    ]);
+    let w = SVector::<f64, 3>::from([
+        x.index(10).to_owned(),
+        x.index(11).to_owned(),
+        x.index(12).to_owned(),
+    ]);
+
+    return (q, w);
 }
 
 struct Observer<const N: usize> {}
@@ -144,12 +258,12 @@ impl<const N: usize> Controller<N> {
 }
 
 // Magic numbers for RK45 solver
-const A1: f64 = 0.0;
-const A2: f64 = 2.0 / 9.0;
-const A3: f64 = 1.0 / 3.0;
-const A4: f64 = 3.0 / 4.0;
-const A5: f64 = 1.0;
-const A6: f64 = 5.0 / 6.0;
+//const A1: f64 = 0.0;
+//const A2: f64 = 2.0 / 9.0;
+//const A3: f64 = 1.0 / 3.0;
+//const A4: f64 = 3.0 / 4.0;
+//const A5: f64 = 1.0;
+//const A6: f64 = 5.0 / 6.0;
 const B21: f64 = 2.0 / 9.0;
 const B31: f64 = 1.0 / 12.0;
 const B32: f64 = 1.0 / 4.0;
@@ -292,7 +406,6 @@ impl<const N: usize, const M: usize> RK45<N, M> {
         t: f64,
         dt: f64,
     ) -> Result<(SVector<f64, N>, f64), SolverError> {
-        event!(Level::INFO, "step");
         let increments = self.compute_increments(x, u, df, t, dt);
         let solution = self.compute_solution(x, &increments);
         let truncation_error = self.compute_truncation_error(&increments);
@@ -314,7 +427,6 @@ impl<const N: usize, const M: usize> RK45<N, M> {
         t: f64,
         t_target: f64,
     ) -> (SVector<f64, N>, f64) {
-        event!(Level::INFO, "step_to");
         let dt = t_target - t;
 
         let increments = self.compute_increments(x, u, df, t, dt);
