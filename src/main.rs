@@ -1,7 +1,7 @@
 extern crate nalgebra as na;
 
 use anyhow::Result;
-use na::{Quaternion, SMatrix, SVector, UnitQuaternion};
+use na::{Quaternion, Rotation3, SMatrix, SVector, Unit, UnitQuaternion, Vector3};
 use tracing::{event, Level};
 use tracing_subscriber;
 
@@ -218,24 +218,77 @@ fn lvlh(x: SVector<f64, 13>) -> (Quaternion<f64>, SVector<f64, 3>) {
         x.index(1).to_owned(),
         x.index(2).to_owned(),
     ]);
+
     let v = SVector::<f64, 3>::from([
         x.index(3).to_owned(),
         x.index(4).to_owned(),
         x.index(5).to_owned(),
     ]);
+
     let q = Quaternion::from([
         x.index(6).to_owned(),
         x.index(7).to_owned(),
         x.index(8).to_owned(),
         x.index(9).to_owned(),
     ]);
+
     let w = SVector::<f64, 3>::from([
         x.index(10).to_owned(),
         x.index(11).to_owned(),
         x.index(12).to_owned(),
     ]);
 
-    return (q, w);
+    let w_o = SVector::<f64, 3>::new(0.0, v.norm() / r.norm(), 0.0);
+
+    let r = -r.normalize();
+    let v = v.normalize();
+
+    //let rot = Rotation3::from_basis_unchecked(&[v, n, r]);
+
+    //let angle = rot.angle() / 2.0;
+    //let axis = match rot.axis() {
+    //    Some(axis) => axis,
+    //    None => Vector3::x_axis(),
+    //};
+
+    //let q_lvlh = Quaternion::new(
+    //    angle.cos(),
+    //    axis[0] * angle.sin(),
+    //    axis[1] * angle.sin(),
+    //    axis[2] * angle.sin(),
+    //);
+
+    //let w_lvlh = q_lvlh * Quaternion::new(0.0, w[0], w[1], w[2]) * q_lvlh.conjugate();
+    //let w_lvlh = SVector::<f64, 3>::new(w_lvlh.i, w_lvlh.j, w_lvlh.k);
+
+    let z_eci = SVector::<f64, 3>::new(0.0, 0.0, 1.0);
+    let a1 = z_eci.cross(&r);
+    let q1 = Quaternion::new(1.0 + z_eci.dot(&r), a1[0], a1[1], a1[2]).normalize();
+
+    let x_eci = Quaternion::new(0.0, 1.0, 0.0, 0.0);
+    let x_q1 = q1 * x_eci * q1.conjugate();
+    let x_q1 = SVector::<f64, 3>::new(x_q1.i, x_q1.j, x_q1.k);
+
+    // Dot product provides no information if vector A is clockwise or counter-clockwise from vector B
+    let angle: f64;
+    if (x_q1.cross(&v) * r.transpose())[0].asin() > 0.0 {
+        angle = (x_q1.dot(&v)).acos() / 2.0;
+    } else {
+        angle = -(x_q1.dot(&v)).acos() / 2.0;
+    }
+    let axis = r;
+    let q2 = Quaternion::new(
+        angle.cos(),
+        axis[0] * angle.sin(),
+        axis[1] * angle.sin(),
+        axis[2] * angle.sin(),
+    );
+
+    let q_lvlh = q2 * q1;
+    let w_lvlh = q_lvlh * Quaternion::new(0.0, w[0], w[1], w[2]) * q_lvlh.conjugate();
+    let w_lvlh = SVector::<f64, 3>::new(w_lvlh.i, w_lvlh.j, w_lvlh.k) + w_o;
+
+    return (q_lvlh, w_lvlh);
 }
 
 struct Observer<const N: usize> {}

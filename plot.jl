@@ -71,10 +71,9 @@ function plot_data(name, path)
         plot(df_orbit.x / r_o, df_orbit.y / r_o, df_orbit.z / r_o, formatter=(_...) -> "", legend = :none, dpi=800)
 
         df_orbit = filter!(row-> (row.t % 150 == 0), df_orbit)
-        transform!(df_orbit, [:q0, :q1, :q2, :q3] => ByRow((q0, q1, q2, q3) -> (QuatRotation(q0, q1, q2, q3) * SVector(1.0, 0.0, 0.0))) => [:x_body_x, :x_body_y, :x_body_z])
-        transform!(df_orbit, [:q0, :q1, :q2, :q3] => ByRow((q0, q1, q2, q3) -> (QuatRotation(q0, q1, q2, q3) * SVector(0.0, 1.0, 0.0))) => [:y_body_x, :y_body_y, :y_body_z])
-        transform!(df_orbit, [:q0, :q1, :q2, :q3] => ByRow((q0, q1, q2, q3) -> (QuatRotation(q0, q1, q2, q3) * SVector(0.0, 0.0, 1.0))) => [:z_body_x, :z_body_y, :z_body_z])
-
+        transform!(df_orbit, [:q0_lvlh, :q1_lvlh, :q2_lvlh, :q3_lvlh] => ByRow((q0, q1, q2, q3) -> (QuatRotation(q0, q1, q2, q3) * SVector(1.0, 0.0, 0.0))) => [:x_body_x, :x_body_y, :x_body_z])
+        transform!(df_orbit, [:q0_lvlh, :q1_lvlh, :q2_lvlh, :q3_lvlh] => ByRow((q0, q1, q2, q3) -> (QuatRotation(q0, q1, q2, q3) * SVector(0.0, 1.0, 0.0))) => [:y_body_x, :y_body_y, :y_body_z])
+        transform!(df_orbit, [:q0_lvlh, :q1_lvlh, :q2_lvlh, :q3_lvlh] => ByRow((q0, q1, q2, q3) -> (QuatRotation(q0, q1, q2, q3) * SVector(0.0, 0.0, 1.0))) => [:z_body_x, :z_body_y, :z_body_z])
         
         scatter!(df_orbit.x / r_o, df_orbit.y / r_o, df_orbit.z / r_o, markersize = 0.2)
         arrow3d!(df_orbit.x / r_o, df_orbit.y / r_o, df_orbit.z / r_o, df_orbit.x_body_x, df_orbit.x_body_y, df_orbit.x_body_z; as=-0.01, lc=:red, la=0.5)
