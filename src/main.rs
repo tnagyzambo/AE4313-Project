@@ -202,12 +202,8 @@ fn attitude_dynamics(
     let inertia =
         SMatrix::<f64, 3, 3>::from_diagonal(&SVector::<f64, 3>::new(2500.0, 2300.0, 3100.0));
 
-    //return inertia.try_inverse().unwrap()
-    //    * ((-w).cross(&(inertia * w)) + torque_gg(r, inertia) + torque_d());
-
-    return inertia.try_inverse().unwrap() * (-(w).cross(&(inertia * w)) + u);
-
-    //return inertia.try_inverse().unwrap() * ((-w).cross(&(inertia * w)));
+    return inertia.try_inverse().unwrap()
+        * ((-w).cross(&(inertia * w)) + torque_gg(r, inertia) + torque_d() + u);
 }
 
 /// Gravity gradient torque
@@ -309,7 +305,6 @@ impl State {
 
     fn w_b_lvlh(&self) -> SVector<f64, 3> {
         let w_o = SVector::<f64, 3>::new(0.0, self.v().norm() / self.r().norm(), 0.0);
-        //let w_o = self.v().norm() / self.r().norm() * self.v().cross(&self.r());
         let w_o = self.q_b_lvlh()
             * Quaternion::new(0.0, w_o[0], w_o[1], w_o[2])
             * self.q_b_lvlh().conjugate();
@@ -319,7 +314,7 @@ impl State {
     }
 
     fn set_q_b_in_lvlh(&mut self, q_b: Quaternion<f64>) {
-        let q_b_in_lvlh = self.q_lvlh();
+        let q_b_in_lvlh = self.q_b_lvlh() * q_b;
 
         self.x[6] = q_b_in_lvlh.i;
         self.x[7] = q_b_in_lvlh.j;
