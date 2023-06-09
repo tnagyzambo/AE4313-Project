@@ -43,7 +43,7 @@ function plot_data(name, path)
 
     plot(p1, p2, p3, size = (1000.0, 1000.0), layout = grid(3, 1, heights = (0.5, 0.25, 0.25)))
     # plot(p1, p2, size = (1000.0, 1000.0), layout = grid(2, 1, heights = (0.66, 0.33)))
-    savefig("images/" * name * "_attiude.png")
+    savefig("images/" * name * "_attitude.png")
 
     p1 = plot(df.t, df.q1_b_lvlh, label = L"q_1", ylabel = L"|q|", legend = :topright, xaxis = false, bottom_margin = -5mm, dpi=800)
     p1 = plot!(df.t, df.q2_b_lvlh, label = L"q_2")
@@ -61,7 +61,7 @@ function plot_data(name, path)
 
     plot(p1, p2, p3, size = (1000.0, 1000.0), layout = grid(3, 1, heights = (0.5, 0.25, 0.25)))
     # plot(p1, p2, size = (1000.0, 1000.0), layout = grid(2, 1, heights = (0.66, 0.33)))
-    savefig("images/" * name * "_attiude_lvlh.png")
+    savefig("images/" * name * "_attitude_lvlh.png")
 
 
     t_o = 5100

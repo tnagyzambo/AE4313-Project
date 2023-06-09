@@ -2,6 +2,8 @@ extern crate nalgebra as na;
 
 use anyhow::Result;
 use na::{Quaternion, Rotation3, SMatrix, SVector, Unit, UnitQuaternion, Vector3};
+use rand::thread_rng;
+use rand_distr::{Distribution, Normal};
 use tracing::{event, Level};
 use tracing_subscriber;
 
@@ -96,7 +98,14 @@ fn main() -> Result<()> {
     let mut x_obv = observer.step(&x);
     let mut dt = dt_0;
     controller.step(&x);
-    wtr.serialize((t, x.x, x.q_lvlh(), x.q_b_lvlh(), x.w_b_lvlh(), controller.u))?;
+    wtr.serialize((
+        t,
+        x.x,
+        x.q_lvlh(),
+        x.q_b_lvlh_meas(),
+        x.w_b_lvlh_meas(),
+        controller.u,
+    ))?;
 
     // Loop
     while t < t_end {
@@ -119,7 +128,14 @@ fn main() -> Result<()> {
         }
         dt = dt_new;
 
-        wtr.serialize((t, x.x, x.q_lvlh(), x.q_b_lvlh(), x.w_b_lvlh(), controller.u))?;
+        wtr.serialize((
+            t,
+            x.x,
+            x.q_lvlh(),
+            x.q_b_lvlh_meas(),
+            x.w_b_lvlh_meas(),
+            controller.u,
+        ))?;
     }
 
     wtr.flush()?;
@@ -252,6 +268,7 @@ impl State {
         ]);
     }
 
+    /// Returns q_{B/I} (Orientation of Body w.r.t. ECI)
     fn q(&self) -> Quaternion<f64> {
         return Quaternion::from([
             self.x.index(6).to_owned(),
@@ -261,6 +278,7 @@ impl State {
         ]);
     }
 
+    /// Returns \omega_{B/I}^{B} (Angular velocity of Body w.r.t. ECI expressed in Body)
     fn w(&self) -> SVector<f64, 3> {
         return SVector::<f64, 3>::from([
             self.x.index(10).to_owned(),
@@ -269,6 +287,7 @@ impl State {
         ]);
     }
 
+    /// Returns q_{L/I} (Orientaion of LVLH w.r.t. ECI)
     fn q_lvlh(&self) -> Quaternion<f64> {
         let r = -self.r().normalize();
         let v = self.v().normalize();
@@ -299,10 +318,16 @@ impl State {
         return (q2 * q1).normalize();
     }
 
+    /// Returns q_{B/L} (Orientation of Body relative to LVLH)
+    ///
+    /// q_{B/L} = q_{B/I} * q_{L/I}
     fn q_b_lvlh(&self) -> Quaternion<f64> {
         return self.q() * self.q_lvlh().conjugate();
     }
 
+    /// Returns \omega_{B/L}^{B} (Angular velocity of body relative to LVLH expressed in Body)
+    ///
+    /// \omega_{B/L}^{B} = \omega_{B/I}^{B} - T_{B/L} * \omega_{L/I}^{L}
     fn w_b_lvlh(&self) -> SVector<f64, 3> {
         let w_o = SVector::<f64, 3>::new(0.0, self.v().norm() / self.r().norm(), 0.0);
         let w_o = self.q_b_lvlh()
@@ -311,6 +336,24 @@ impl State {
         let w_o = SVector::<f64, 3>::new(w_o.i, w_o.j, w_o.k);
 
         return self.w() - w_o;
+    }
+
+    fn q_b_lvlh_meas(&self) -> Quaternion<f64> {
+        let mut rng = thread_rng();
+        let normal = Normal::new(0.0, 0.1).unwrap();
+        let noise = UnitQuaternion::from_euler_angles(
+            normal.sample(&mut rng),
+            normal.sample(&mut rng),
+            normal.sample(&mut rng),
+        )
+        .quaternion()
+        .to_owned();
+
+        return (self.q() * noise.conjugate()) * self.q_lvlh().conjugate();
+    }
+
+    fn w_b_lvlh_meas(&self) -> SVector<f64, 3> {
+        return self.w_b_lvlh() + SVector::<f64, 3>::new(0.0035, -0.00175, 0.0026);
     }
 
     fn set_q_b_in_lvlh(&mut self, q_b: Quaternion<f64>) {
@@ -344,8 +387,8 @@ impl Controller {
         //let w_e = x.w;
 
         // Body axes to LVLH
-        let q_e = x.q_b_lvlh();
-        let w_e = x.w();
+        let q_e = x.q_b_lvlh_meas();
+        let w_e = x.w_b_lvlh_meas();
 
         self.u = -self.k_d * w_e - self.k_p * SVector::<f64, 3>::new(q_e.i, q_e.j, q_e.k);
     }
