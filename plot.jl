@@ -45,15 +45,26 @@ function plot_data(name, path)
     # plot(p1, p2, size = (1000.0, 1000.0), layout = grid(2, 1, heights = (0.66, 0.33)))
     savefig("images/" * name * "_attitude.png")
 
-    p1 = plot(df.t, df.q1_b_lvlh, label = L"q_1", ylabel = L"|q|", legend = :topright, xaxis = false, bottom_margin = -5mm, dpi=800)
-    p1 = plot!(df.t, df.q2_b_lvlh, label = L"q_2")
-    p1 = plot!(df.t, df.q3_b_lvlh, label = L"q_3")
-    p1 = plot!(df.t, df.q0_b_lvlh, label = L"q_0")
+    p1 = plot(df.t, df.q1_b_lvlh_meas, label = L"\tilde{q}_1", color = 1, alpha = 0.5, ylabel = L"|q|", legend = :topright, xaxis = false, bottom_margin = -5mm, dpi=800)
+    p1 = plot!(df.t, df.q2_b_lvlh_meas, label = L"\tilde{q}_2", color = 2, alpha = 0.5)
+    p1 = plot!(df.t, df.q3_b_lvlh_meas, label = L"\tilde{q}_3", color = 3, alpha = 0.5)
+    p1 = plot!(df.t, df.q0_b_lvlh_meas, label = L"\tilde{q}_0", color = 4, alpha = 0.5)
+    p1 = plot!(df.t, df.q1_b_lvlh, label = L"q_1", color = 1)
+    p1 = plot!(df.t, df.q2_b_lvlh, label = L"q_2", color = 2)
+    p1 = plot!(df.t, df.q3_b_lvlh, label = L"q_3", color = 3)
+    p1 = plot!(df.t, df.q0_b_lvlh, label = L"q_0", color = 4)
+    p1 = plot!(df.t, df.q1_mekf, label = L"\hat{q}_1", linestyle = :dash, color = 1)
+    p1 = plot!(df.t, df.q2_mekf, label = L"\hat{q}_2", linestyle = :dash, color = 2)
+    p1 = plot!(df.t, df.q3_mekf, label = L"\hat{q}_3", linestyle = :dash, color = 3)
+    p1 = plot!(df.t, df.q0_mekf, label = L"\hat{q}_0", linestyle = :dash, color = 4)
 
-    p2 = plot(df.t, df.w1_b_lvlh, label = L"\omega_1", ylabel = L"\omega (rad/s)", legend = :topright, xaxis = false, bottom_margin = -5mm)
+    p2 = plot(df.t, df.w1_b_lvlh_meas, label = L"\hat{\omega}_1", color = 1, linestyle = :dot, ylabel = L"\omega (rad/s)", legend = :topright, xaxis = false, bottom_margin = -5mm)
     # p2 = plot(df.t, df.w1_b_lvlh, label = L"\omega_1", ylabel = L"\omega (rad/s)", xlabel = L"Time (s)", legend = :topright)
-    p2 = plot!(df.t, df.w2_b_lvlh, label = L"\omega_2")
-    p2 = plot!(df.t, df.w3_b_lvlh, label = L"\omega_3")
+    p2 = plot!(df.t, df.w2_b_lvlh_meas, label = L"\hat{\omega}_2", color = 2, linestyle = :dot)
+    p2 = plot!(df.t, df.w3_b_lvlh_meas, label = L"\hat{\omega}_3", color = 3, linestyle = :dot)
+    p2 = plot!(df.t, df.w1_b_lvlh, label = L"\omega_1", color = 1)
+    p2 = plot!(df.t, df.w2_b_lvlh, label = L"\omega_2", color = 2)
+    p2 = plot!(df.t, df.w3_b_lvlh, label = L"\omega_3", color = 3)
    
     p3 = plot(df.t, df.u1, label = L"u_1", xlabel = L"Time (s)", ylabel = L"u (Nm)", legend = :topright)
     p3 = plot!(df.t, df.u2, label = L"u_2")
@@ -90,7 +101,7 @@ function plot_data(name, path)
     end
 end
 
-name = "pd_noise"
+name = "pd_noise_mekf"
 path = "out.csv"
 
 plot_data(name, path)

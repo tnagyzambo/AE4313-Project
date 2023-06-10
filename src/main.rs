@@ -10,7 +10,7 @@ use tracing_subscriber;
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let t_orbit = 5100.0;
+    let t_orbit = 1000.0;
     let n_orbit = 1.0;
     let t_start = 0.0;
     let t_end = t_orbit * n_orbit;
@@ -22,6 +22,10 @@ fn main() -> Result<()> {
         .transform_vector(&SVector::<f64, 3>::new(0.0, 7.5043e3, 0.0)); // Initial orbital velocity
     let q_0 = Quaternion::new(1.0, 0.0, 0.0, 0.0); // Initial satellite attitude
     let w_0 = SVector::<f64, 3>::new(0.0, 0.0, 0.0); // Initial body angular velocity
+    let a_hat_0 = SVector::<f64, 3>::new(0.0, 0.0, 0.0);
+    let b_hat_0 = SVector::<f64, 3>::new(0.0, 0.0, 0.0);
+    let q_hat_0 = Quaternion::new(1.0, 0.0, 0.0, 0.0);
+    let p_0 = SMatrix::<f64, 6, 6>::identity();
 
     let mut x_0 = State::from(SVector::from([
         r_0.index(0).to_owned(),
@@ -43,6 +47,7 @@ fn main() -> Result<()> {
             .quaternion()
             .to_owned(),
     );
+    let mekf_state_0 = MekfState::new(a_hat_0, b_hat_0, q_hat_0, p_0);
 
     let mut t = t_start;
     let mut t_prev_control_step = t_start;
@@ -52,8 +57,6 @@ fn main() -> Result<()> {
         dt_max: dt_control,
         tol: 1E-10,
     };
-
-    let mut observer = Observer {};
 
     let mut controller = Controller {
         k_p: 1.0,
@@ -90,20 +93,38 @@ fn main() -> Result<()> {
         "w1_b_lvlh",
         "w2_b_lvlh",
         "w3_b_lvlh",
+        "q1_b_lvlh_meas",
+        "q2_b_lvlh_meas",
+        "q3_b_lvlh_meas",
+        "q0_b_lvlh_meas",
+        "w1_b_lvlh_meas",
+        "w2_b_lvlh_meas",
+        "w3_b_lvlh_meas",
+        "q1_mekf",
+        "q2_mekf",
+        "q3_mekf",
+        "q0_mekf",
+        "w1_mekf",
+        "w2_mekf",
+        "w3_mekf",
         "u1",
         "u2",
         "u3",
     ])?;
     let mut x = x_0;
-    let mut x_obv = observer.step(&x);
+    let mut mekf_state = mekf_state_0;
     let mut dt = dt_0;
     controller.step(&x);
     wtr.serialize((
         t,
         x.x,
         x.q_lvlh(),
+        x.q_b_lvlh(),
+        x.w_b_lvlh(),
         x.q_b_lvlh_meas(),
         x.w_b_lvlh_meas(),
+        mekf_state.q_hat,
+        mekf_state.b_hat,
         controller.u,
     ))?;
 
@@ -116,26 +137,49 @@ fn main() -> Result<()> {
         if (t + dt) > t_next_control_step {
             (x, dt) = solver.step_to(x, controller.u, combined, t, t_next_control_step);
             t = t + dt;
-            x_obv = observer.step(&x);
+            mekf_state = mekf(&x, &mekf_state, dt);
             controller.step(&x);
             t_prev_control_step = t;
+
+            wtr.serialize((
+                t,
+                x.x,
+                x.q_lvlh(),
+                x.q_b_lvlh(),
+                x.w_b_lvlh(),
+                "NaN",
+                "NaN",
+                "NaN",
+                "NaN",
+                "NaN",
+                "NaN",
+                "NaN",
+                mekf_state.q_hat,
+                mekf_state.b_hat,
+                controller.u,
+            ))?;
         } else {
             t = t + dt;
             // A step_to with dt = 0.0 blows up the next interation
             // Cannot use dt from forced step
             //(x, dt) = (x_new, dt_new);
             x = x_new;
-        }
-        dt = dt_new;
 
-        wtr.serialize((
-            t,
-            x.x,
-            x.q_lvlh(),
-            x.q_b_lvlh_meas(),
-            x.w_b_lvlh_meas(),
-            controller.u,
-        ))?;
+            wtr.serialize((
+                t,
+                x.x,
+                x.q_lvlh(),
+                x.q_b_lvlh(),
+                x.w_b_lvlh(),
+                x.q_b_lvlh_meas(),
+                x.w_b_lvlh_meas(),
+                mekf_state.q_hat,
+                mekf_state.b_hat,
+                controller.u,
+            ))?;
+        }
+
+        dt = dt_new;
     }
 
     wtr.flush()?;
@@ -366,12 +410,114 @@ impl State {
     }
 }
 
-struct Observer {}
+struct MekfState {
+    a_hat: SVector<f64, 3>,
+    b_hat: SVector<f64, 3>,
+    q_hat: Quaternion<f64>,
+    p: SMatrix<f64, 6, 6>,
+}
 
-impl Observer {
-    fn step(&self, x: &State) -> State {
-        return x.to_owned();
+impl MekfState {
+    fn new(
+        a_hat: SVector<f64, 3>,
+        b_hat: SVector<f64, 3>,
+        q_hat: Quaternion<f64>,
+        p: SMatrix<f64, 6, 6>,
+    ) -> Self {
+        return Self {
+            a_hat: a_hat,
+            b_hat: b_hat,
+            q_hat: q_hat,
+            p: p,
+        };
     }
+}
+
+fn mekf(x: &State, mekf_state: &MekfState, dt: f64) -> MekfState {
+    let q_hat = mekf_state.q_hat;
+    let b_hat = mekf_state.b_hat;
+    let x_hat = SVector::<f64, 6>::new(0.0, 0.0, 0.0, b_hat[0], b_hat[1], b_hat[2]); // reset a_hat
+    let q_meas = x.q_b_lvlh_meas();
+    let p = mekf_state.p;
+    let ref_vec = SVector::<f64, 3>::new(x.q_lvlh().i, x.q_lvlh().j, x.q_lvlh().k);
+
+    // Gain
+    let a = UnitQuaternion::from_quaternion(q_hat).to_rotation_matrix();
+    let h = a * ref_vec;
+    let h_skew = skew_sym(h);
+    let big_h = SMatrix::<f64, 3, 6>::new(
+        h_skew.m11, h_skew.m12, h_skew.m13, 0.0, 0.0, 0.0, //
+        h_skew.m21, h_skew.m22, h_skew.m23, 0.0, 0.0, 0.0, //
+        h_skew.m31, h_skew.m32, h_skew.m33, 0.0, 0.0, 0.0,
+    );
+    let r = 1.0 * SMatrix::<f64, 3, 3>::identity();
+    let k = p * big_h.transpose() * (big_h * p * big_h.transpose() + r).try_inverse().unwrap();
+
+    // Update
+    let p = (SMatrix::<f64, 6, 6>::identity() - k * big_h) * p;
+    let y_tilde = SVector::<f64, 3>::new(q_meas.i, q_meas.j, q_meas.k);
+    let x_hat = x_hat + k * (y_tilde - h);
+    let a_hat = SVector::<f64, 3>::new(x_hat[0], x_hat[1], x_hat[2]);
+    let b_hat = SVector::<f64, 3>::new(x_hat[3], x_hat[4], x_hat[5]);
+    let q_hat =
+        (q_hat + 0.5 * Quaternion::new(0.0, a_hat[0], a_hat[1], a_hat[2]) * q_hat).normalize();
+
+    // Propagation
+    let w_hat = x.w_b_lvlh_meas() - b_hat;
+    let phi = (0.5 * w_hat.norm() * dt).sin() * w_hat / w_hat.norm();
+    let z = (0.5 * w_hat.norm() * dt).cos() * SMatrix::<f64, 3, 3>::identity() - skew_sym(phi);
+    let omega = SMatrix::<f64, 4, 4>::new(
+        z.m11,
+        z.m12,
+        z.m13,
+        phi[0], //
+        z.m21,
+        z.m22,
+        z.m23,
+        phi[1], //
+        z.m31,
+        z.m32,
+        z.m33, //
+        phi[2],
+        -phi[0],
+        -phi[1],
+        -phi[2],
+        (0.5 * w_hat.norm() * dt).cos(),
+    );
+    let q_hat = Quaternion::from_vector(omega * q_hat.as_vector());
+
+    let q = 0.01
+        * SMatrix::<f64, 6, 6>::new(
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 1.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        );
+    let g = SMatrix::<f64, 6, 6>::new(
+        -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+        0.0, -1.0, 0.0, 0.0, 0.0, 0.0, //
+        0.0, 0.0, -1.0, 0.0, 0.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, //
+        0.0, 0.0, 0.0, 0.0, 1.0, 0.0, //
+        0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    );
+    let w_skew = -skew_sym(w_hat);
+    let f = SMatrix::<f64, 6, 6>::new(
+        w_skew.m11, w_skew.m12, w_skew.m13, -1.0, 0.0, 0.0, //
+        w_skew.m21, w_skew.m22, w_skew.m23, 0.0, -1.0, 0.0, //
+        w_skew.m31, w_skew.m32, w_skew.m33, 0.0, 0.0, -1.0, //
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    );
+    let p = (SMatrix::<f64, 6, 6>::identity() + dt * f)
+        * p
+        * (SMatrix::<f64, 6, 6>::identity() + dt * f).transpose()
+        + g * q * g.transpose();
+
+    return MekfState::new(a_hat, b_hat, q_hat, p);
 }
 
 struct Controller {
@@ -578,4 +724,12 @@ impl<const M: usize> RK45<M> {
 
         (solution, dt)
     }
+}
+
+fn skew_sym(x: SVector<f64, 3>) -> SMatrix<f64, 3, 3> {
+    return SMatrix::<f64, 3, 3>::new(
+        0.0, -x[2], x[1], //
+        x[2], 0.0, -x[0], //
+        -x[1], x[0], 0.0,
+    );
 }
