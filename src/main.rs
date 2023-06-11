@@ -10,7 +10,7 @@ use tracing_subscriber;
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let t_orbit = 1000.0;
+    let t_orbit = 5000.0;
     let n_orbit = 1.0;
     let t_start = 0.0;
     let t_end = t_orbit * n_orbit;
@@ -113,7 +113,9 @@ fn main() -> Result<()> {
     let mut x = x_0;
     let mut mekf_state = mekf_state_0;
     let mut dt = dt_0;
-    controller.step(&x);
+    let mut q_hat = q_0;
+    let mut w_hat = w_0;
+    controller.step(&x, &q_hat, &w_hat);
     wtr.serialize((
         t,
         x.x,
@@ -122,8 +124,8 @@ fn main() -> Result<()> {
         x.w_b_lvlh(),
         x.q_b_lvlh_meas(),
         x.w_b_lvlh_meas(),
-        mekf_state.q_hat,
-        mekf_state.b_hat,
+        q_hat,
+        w_hat,
         controller.u,
     ))?;
 
@@ -136,8 +138,8 @@ fn main() -> Result<()> {
         if (t + dt) > t_next_control_step {
             (x, dt) = solver.step_to(x, controller.u, combined, t, t_next_control_step);
             t = t + dt;
-            mekf_state = mekf(&x, &mekf_state, dt);
-            controller.step(&x);
+            (mekf_state, q_hat, w_hat) = mekf(&x, &mekf_state, dt);
+            controller.step(&x, &q_hat, &w_hat);
             t_prev_control_step = t;
 
             wtr.serialize((
@@ -153,8 +155,8 @@ fn main() -> Result<()> {
                 "NaN",
                 "NaN",
                 "NaN",
-                mekf_state.q_hat,
-                mekf_state.b_hat,
+                q_hat,
+                w_hat,
                 controller.u,
             ))?;
         } else {
@@ -172,8 +174,8 @@ fn main() -> Result<()> {
                 x.w_b_lvlh(),
                 x.q_b_lvlh_meas(),
                 x.w_b_lvlh_meas(),
-                mekf_state.q_hat,
-                mekf_state.b_hat,
+                q_hat,
+                w_hat,
                 controller.u,
             ))?;
         }
@@ -425,7 +427,11 @@ impl MekfState {
     }
 }
 
-fn mekf(x: &State, mekf_state: &MekfState, dt: f64) -> MekfState {
+fn mekf(
+    x: &State,
+    mekf_state: &MekfState,
+    dt: f64,
+) -> (MekfState, Quaternion<f64>, SVector<f64, 3>) {
     let q_hat = mekf_state.q_hat;
     let b_hat = mekf_state.b_hat;
     let p = mekf_state.p;
@@ -435,15 +441,15 @@ fn mekf(x: &State, mekf_state: &MekfState, dt: f64) -> MekfState {
     let r2 = SVector::<f64, 3>::new(0.0, 0.0, 1.0);
     let b1 = UnitQuaternion::from_quaternion(q_hat.conjugate()).to_rotation_matrix() * r1;
     let b2 = UnitQuaternion::from_quaternion(q_hat.conjugate()).to_rotation_matrix() * r2;
-    let big_r = 0.0000001 * SMatrix::<f64, 6, 6>::identity();
-    let big_q = 0.0000001
+    let big_r = 0.000001 * SMatrix::<f64, 6, 6>::identity();
+    let big_q = 0.000000001
         * SMatrix::<f64, 6, 6>::new(
-            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
-            0.0, 1.0, 0.0, 0.0, 0.0, 0.0, //
-            0.0, 0.0, 1.0, 0.0, 0.0, 0.0, //
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, 1.0, //
         );
 
     // Gain
@@ -507,9 +513,11 @@ fn mekf(x: &State, mekf_state: &MekfState, dt: f64) -> MekfState {
     let q_hat = (Quaternion::new(1.0, dq_hat[0] / 2.0, dq_hat[1] / 2.0, dq_hat[2] / 2.0) * q_hat)
         .normalize();
     let b_hat = b_hat + db_hat;
+    let w_hat = w_meas - b_hat;
+    let q_hat_k = q_hat;
+    let w_hat_k = w_hat;
 
     // Propagation
-    let w_hat = w_meas - b_hat;
     let phi = (0.5 * w_hat.norm() * dt).sin() * w_hat / w_hat.norm();
     let z = (0.5 * w_hat.norm() * dt).cos() * SMatrix::<f64, 3, 3>::identity() - skew_sym(phi);
     let omega = SMatrix::<f64, 4, 4>::new(
@@ -582,7 +590,7 @@ fn mekf(x: &State, mekf_state: &MekfState, dt: f64) -> MekfState {
     );
     let p = big_phi * p * big_phi.transpose() + big_gamma * big_q * big_gamma.transpose();
 
-    return MekfState::new(q_hat, b_hat, p);
+    return (MekfState::new(q_hat, b_hat, p), q_hat_k, w_hat_k);
 }
 
 struct Controller {
@@ -592,7 +600,7 @@ struct Controller {
 }
 
 impl Controller {
-    fn step(&mut self, x: &State) {
+    fn step(&mut self, x: &State, q_hat: &Quaternion<f64>, w_hat: &SVector<f64, 3>) {
         // Body axes to ECI
         //let q_e = x.q.conjugate();
         //let w_e = x.w;
@@ -600,6 +608,10 @@ impl Controller {
         // Body axes to LVLH
         let q_e = x.q_b_lvlh_meas();
         let w_e = x.w_b_lvlh_meas();
+
+        // MEKF
+        //let q_e = mekf_state.q_hat;
+        //let w_e = x.w_b_lvlh_meas() - mekf_state.b_hat;
 
         self.u = -self.k_d * w_e - self.k_p * SVector::<f64, 3>::new(q_e.i, q_e.j, q_e.k);
     }

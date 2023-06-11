@@ -66,11 +66,11 @@
 
 \section{Introduction}
 
-The goal of this assignment is to create a control system for the attitude tracking problem of a Nadir pointing spacecraft. This control system is robust to external disturbances as well as noise and bias in the sensor measurements. To achieve this, the control system consists of a PD controller and a Multiplacative Quaternion Extended Kalman Filter (MQEFK). In order to further explore the problem space, additional goals were set beyond what were outlined in the assignment. Firstly, the code used simulate the satellite is written in Rust in order to gain an understanding of the practical challenges involved with writting production quality simulations software in a systems-level language. The code created for this assignment might not meet the bar of `production quality`, but a significant amount of understanding was gained in the attempt. Second, the LVLH frame of the circular orbit is modelled and the full Nadir tracking problem of aligning the body axes to the rotating LVLH reference frame is considered. Third, where ever possible quaternions are used to model the system in order to develop a deeper understanding about the math behind them.
+The goal of this assignment is to create a control system for the attitude tracking problem of a Nadir pointing spacecraft. This control system is robust to external disturbances as well as noise and bias in the sensor measurements. To achieve this, the control system consists of a PD controller and a Multiplicative `Extended Kalman Filter (MEFK). In order to further explore the problem space, additional goals were set beyond what were outlined in the assignment. Firstly, the code used simulate the satellite is written in Rust in order to gain an understanding of the practical challenges involved with writing production quality simulations software in a systems-level language. The code created for this assignment might not meet the bar of `production quality`, but a significant amount of understanding was gained in the attempt. Second, the LVLH frame of the circular orbit is modeled and the full Nadir tracking problem of aligning the body axes to the rotating LVLH reference frame is considered. Third, where ever possible quaternions are used to model the system in order to develop a deeper understanding about the math behind them.
 
 \section{Simulation Framework}
 
-An adaptive time-stepping Runge-Kutta 45 (RK45) solver was written and used to simulate all results in this assigment.The motivation for using an RK45 is the proven peformance of the algorithm. The selection of adaptive-time stepping is motivated by the potential for long running space missions with protions of low dynmic intesitty. Taking larger time steps in these areas can siginifcantly reduce the computational cost. However the control loop must run at a fixed interval, so additional logic must be included in the RK45 solver to not overrun the next iteration of the control loop. The main logic of this selection between adaptive stepping and fixed interval control can be found in Figure \ref{fig:main_loop}.
+An adaptive time-stepping Runge-Kutta 45 (RK45) solver was written and used to simulate all results in this assignment.The motivation for using an RK45 is the proven performance of the algorithm. The selection of adaptive-time stepping is motivated by the potential for long running space missions with portions of low dynamic intensity. Taking larger time steps in these areas can significantly reduce the computational cost. However the control loop must run at a fixed interval, so additional logic must be included in the RK45 solver to not overrun the next iteration of the control loop. The main logic of this selection between adaptive stepping and fixed interval control can be found in Figure \ref{fig:main_loop}.
 
 \begin{figure}[h]
 	\begin{verbatim}
@@ -99,7 +99,7 @@ An adaptive time-stepping Runge-Kutta 45 (RK45) solver was written and used to s
 
 \subsection{Orbits and Reference Frames}
 
-The Earth Centered Inertial (ECI) reference frame $\mathcal{F}_I$ is placed coincedent to the basis of the cartesian coordinates system. The position and velocty of the spacecraft w.r.t. $\mathcal{F}_I$ are defined by $\vec{r}$ and $\vec{v}$ respectivley. From this, the kinematics (\ref{eqn:kin_orbit}) and dynamics (\ref{eqn:dyn_orbit}) for a simple circular orbit can be written. These values are initialized with a $\vec{r}$ and $\vec{v}$ corresponding to a 700km orbit at an arbitrary inclication.
+The Earth Centered Inertial (ECI) reference frame $\mathcal{F}_I$ is placed coincident to the basis of the Cartesian coordinates system. The position and velocity of the spacecraft w.r.t. $\mathcal{F}_I$ are defined by $\vec{r}$ and $\vec{v}$ respectively. From this, the kinematics (\ref{eqn:kin_orbit}) and dynamics (\ref{eqn:dyn_orbit}) for a simple circular orbit can be written. These values are initialized with a $\vec{r}$ and $\vec{v}$ corresponding to a 700km orbit at an arbitrary inclination.
 
 \begin{equation}
 	\dot{r} = \frac{\vec{r} \times \vec{v}}{|\vec{r}|^2} \times \vec{r}
@@ -111,7 +111,7 @@ The Earth Centered Inertial (ECI) reference frame $\mathcal{F}_I$ is placed coin
 	\label{eqn:dyn_orbit}
 \end{equation}
 
-The Local Vertical Local Horizon (LVLH) refernce frame $\mathcal{F}_{L}$ can be built from these vectors by creating the quaternion $q_{L}$ (\ref{eqn:q_lvlh}) that rotates $\mathcal{F}_I$ to $\mathcal{F}_{L}$. This is done by creating a quaternion $q_1$ (\ref{eqn:q1}) that rotates the $\hat{k}$ vector of the basis to align with $\vec{r}$. A second quaternion $q_2$ (\ref{eqn:q2}) is then created to rotate the transformed basis about its $\hat{k}$ axis. The angle of this rotation is equal to the dot product of the transformed $\hat{i}$ direction and $\vec{v}$. Since the dot product operator provides no indication of the direction of rotation, only the magnitude, some logic is used to correctly rotate the basis.
+The Local Vertical Local Horizon (LVLH) reference frame $\mathcal{F}_{L}$ can be built from these vectors by creating the quaternion $q_{L}$ (\ref{eqn:q_lvlh}) that rotates $\mathcal{F}_I$ to $\mathcal{F}_{L}$. This is done by creating a quaternion $q_1$ (\ref{eqn:q1}) that rotates the $\hat{k}$ vector of the basis to align with $\vec{r}$. A second quaternion $q_2$ (\ref{eqn:q2}) is then created to rotate the transformed basis about its $\hat{k}$ axis. The angle of this rotation is equal to the dot product of the transformed $\hat{i}$ direction and $\vec{v}$. Since the dot product operator provides no indication of the direction of rotation, only the magnitude, some logic is used to correctly rotate the basis.
 
 \begin{equation}
 	q_1 = [1 + \hat{k} \times -\hat{r}, [\hat{k} \times -\hat{r}]^T]^T
@@ -130,7 +130,7 @@ The Local Vertical Local Horizon (LVLH) refernce frame $\mathcal{F}_{L}$ can be 
 	\label{eqn:q_lvlh}
 \end{equation}
 
-To determine correct functioning of the orbit, the LVLH frame transformation over time is simulated. This formulation of the LVLH frame contained a discontinuity in the quaternion that pervents smooth control of the spacecraft over multiple orbits. This issues was not able to be solved within the time constraints of the project. Figures \ref{fig:quat_lvlh} and \ref{fig:orbit_lvlh} show the evolution over time of $q_L$ and the correct functioning of the $\mathcal{F}_L$ simulation. Due to the disconinity futher sections will only consider a partial orbit.
+To determine correct functioning of the orbit, the LVLH frame transformation over time is simulated. This formulation of the LVLH frame contained a discontinuity in the quaternion that prevents smooth control of the spacecraft over multiple orbits. This issues was not able to be solved within the time constraints of the project. Figures \ref{fig:quat_lvlh} and \ref{fig:orbit_lvlh} show the evolution over time of $q_L$ and the correct functioning of the $\mathcal{F}_L$ simulation. Due to the discontinuity further sections will only consider a partial orbit.
 
 \begin{figure}[H]
 \centering
@@ -149,9 +149,9 @@ To determine correct functioning of the orbit, the LVLH frame transformation ove
 	\caption{LVLH Reference Frame Simulation}
 \end{figure}
 
-\subsection{Sattelite Model}
+\subsection{Satellite Model}
 
-The sattelite kinematics \ref{eqn:kin_sat} and dynamics \ref{eqn:dyn_sat} are modelled in quaterion form. The equations describe the motion of the sattilite's body reference frame $\mathcal{F}_B$ with respect to $\mathcal{F}_I$. The quaternion $q_{B/I}$ decribes the rotation from $\mathcal{F}_I$ to $\mathcal{F}_B$ while the vector $\omega_{B/I}^B$ describes the agular velocity of $\mathcal{F}_B$ with respect to $\mathcal{F}_I$ expressed in $\mathcal{F}_B$. 
+The satellite kinematics \ref{eqn:kin_sat} and dynamics \ref{eqn:dyn_sat} are modeled in quaternion form. The equations describe the motion of the satellite's body reference frame $\mathcal{F}_B$ with respect to $\mathcal{F}_I$. The quaternion $q_{B/I}$ describes the rotation from $\mathcal{F}_I$ to $\mathcal{F}_B$ while the vector $\omega_{B/I}^B$ describes the angular velocity of $\mathcal{F}_B$ with respect to $\mathcal{F}_I$ expressed in $\mathcal{F}_B$. 
 
 \begin{equation}
 	\dot{q}_{B/I} = \frac{1}{2} \omega_{B/I}^B \otimes q_{B/I}
@@ -163,7 +163,7 @@ The sattelite kinematics \ref{eqn:kin_sat} and dynamics \ref{eqn:dyn_sat} are mo
 	\label{eqn:dyn_sat}
 \end{equation}
 
-The inertial matrix of the sattelite $I$ \ref{eqn:inertia} and the disturbance torque $T_{dist}$ \ref{eqn:t_dist} are implemented with the values from the assignment.
+The inertial matrix of the satellite $I$ \ref{eqn:inertia} and the disturbance torque $T_{dist}$ \ref{eqn:t_dist} are implemented with the values from the assignment.
 
 \begin{equation}
 	I = \left[\begin{matrix}
@@ -181,14 +181,14 @@ The inertial matrix of the sattelite $I$ \ref{eqn:inertia} and the disturbance t
 	\label{eqn:t_dist}
 \end{equation}
 
-The gravity gradient torque experianced by the satellite is implemented as a function of it's orbital position $\vec{r}$ \ref{eqn:t_gg}.
+The gravity gradient torque experienced by the satellite is implemented as a function of it's orbital position $\vec{r}$ \ref{eqn:t_gg}.
 
 \begin{equation}
 	T_{gg} = \frac{3\mu}{|\vec{r}|^3} -\hat{r} \times (-I\hat{r}) \SI{}{\newton\meter}
 	\label{eqn:t_gg}
 \end{equation}
 
-Simulating the satellite with and inital \SI{10}{\degree} error with respect to $\mathcal{F}_L$ on all body axes results in the motion seen in Figures \ref{fig:quat_dist} and \ref{fig:orbit_dist}. As expected the satellite slowly begins to tumble and by then of the first orbit has completley destabilized.
+Simulating the satellite with and initial \SI{10}{\degree} error with respect to $\mathcal{F}_L$ on all body axes results in the motion seen in Figures \ref{fig:quat_dist} and \ref{fig:orbit_dist}. As expected the satellite slowly begins to tumble and by then of the first orbit has completely destabilized.
 
 \begin{figure}[H]
 \centering
@@ -238,7 +238,7 @@ A Proportional-Derivative (PD) controller was implemented based on the error qua
 	\label{eqn:pd}
 \end{equation}
 
-The gains $k_p = 1$ and $k_d = 10$ where found to addiquatley stabilize the satellite in under one orbit. Figures \ref{fig:quat_pd_perfect} and \ref{fig:orbit_pd_perfect} satellite aligning its body axes to the rotating LVLH frame under the pressence of disturbances. There is a slight steady state error as the controller contains no intgral action.
+The gains $k_p = 1$ and $k_d = 10$ where found to adequately stabilize the satellite in under one orbit. Figures \ref{fig:quat_pd_perfect} and \ref{fig:orbit_pd_perfect} satellite aligning its body axes to the rotating LVLH frame under the presence of disturbances. There is a slight steady state error as the controller contains no integral action.
 
 \begin{figure}[H]
 \centering
@@ -257,7 +257,7 @@ The gains $k_p = 1$ and $k_d = 10$ where found to addiquatley stabilize the sate
 	\caption{Body Frame Simulation PD Control}
 \end{figure}
 
-The PD controller cannot cope with addition of white noise with a standard deviation of \SI{0.1}{\degree} to all body axis attitude measurements, and a bias of $\omega_{bias} = [\begin{matrix} 0.2 & -0.1 & 0.15\end{matrix}] \SI{}{\degree/\second}$ to the body rate measurments. As seen in figures \ref{fig:quat_pd_noise} and \ref{fig:orbit_pd_noise}, the peformance of the LVLH tracking suffers greatly and the an oscillation in the attitiude perisits through the orbit.
+The PD controller cannot cope with addition of white noise with a standard deviation of \SI{0.1}{\degree} to all body axis attitude measurements, and a bias of $\omega_{bias} = [\begin{matrix} 0.2 & -0.1 & 0.15\end{matrix}] \SI{}{\degree/\second}$ to the body rate measurements. As seen in figures \ref{fig:quat_pd_noise} and \ref{fig:orbit_pd_noise}, the performance of the LVLH tracking suffers greatly and the an oscillation in the attitude persists through the orbit.
 
 \begin{figure}[H]
 \centering
@@ -276,6 +276,68 @@ The PD controller cannot cope with addition of white noise with a standard devia
 	\caption{Body Frame Simulation PD Control + Noise}
 \end{figure}
 
+\section{Multiplicative Extended Kalman Filter}
 
+A MEKF was implemented to estimate the attitude of the spacecraft and the biases of its angular rate measurements. The MEKF tracks a local representation (\ref{eqn:mekf_dx}) of errors based on the assumption that the error between the estimated quaternion and the true quaternion is small, and can be expressed as delta vector between the two quaternion's rotation axes. This local representation is not propagated and is reset on every iteration. A global state (\ref{eqn:mekf_x}) corresponding to the the estimated quaternion attitude and gyroscope biases is propagated by the MEKF to future iterations of the algorithm.
+
+\begin{equation}
+	\Delta x = [\begin{matrix}\delta\vec{q}^T & \delta\beta^T \end{matrix}]^T
+	\label{eqn:mekf_dx}
+\end{equation}
+
+\begin{equation}
+	x = [\begin{matrix} \hat{q}^T & \hat{\beta}^T \end{matrix}]^T
+	\label{eqn:mekf_x}
+\end{equation}
+
+The details of the implemented MEKF algorithm can be found in Table \ref{tab:mekf} along with the discrete time propagation matrices used. The discrete time propagation matrices are first-order Taylor series expansions of the error dynamics of the system. Arbitrary reference vectors $r_1$ and $r_2$ where created to simulate readings from LOS sensors.
+
+\begin{table}
+\caption{MEKF Algorithm}
+\label{tab:mekf}
+\centering
+\begin{tabular}{ll}
+	\hline
+	Initialize & $\hat{q}_{k_0} = 0_{1 \times 4}, \hat{\beta}_{k_0} = 0_{1 \times 3}$ \\
+	 & $P_{k_0} = 0_{6 \times 6}$ \\
+	\\
+	Gain & $K_k = P_k^- H_k^T(\hat{x}_k^-)[H_k(\hat{x}_k^-) P_k^- H_k^T(\hat{x}_k^-) + R_k]^{-1}$ \\
+	 & $H_k(\hat{x}_k^-) = \left[\begin{matrix}[A(\hat{q}_k^-)r_1 \times] & 0_{3 \times 3} \\ [A(\hat{q}_k^-)r_2 \times] & 0_{3 \times 3}\end{matrix}\right]$ \\ 
+	\\
+	Update & $P_k^+ = [I - K_k H_k(\hat{x}_k^-)]P_k^-$ \\ 
+	 & $\delta\hat{x}_k^+ = K_k[y_k - h_k(\hat{x}_k^-)]$ \\
+	 & $h_k(\hat{k}_k^-) = \left[\begin{matrix}A(\hat{q}_k^-)r_1 \\ A(\hat{q}_k^-)r_2\end{matrix}\right]$ \\
+	 & $\hat{q}^* = [\begin{matrix}1, & \delta\vec{q}^T\end{matrix}]^T \otimes \hat{q}_k$ \\
+	 & $\hat{q}_k^+ = \frac{\hat{q}^*}{||\hat{q}^*||}$ \\
+	 & $\hat{\beta}_k^+ = \hat{\beta}_k^- + \delta\beta_k^+$ \\
+	 & $\hat{\omega}_k^+ = \tilde{\omega}_k - \hat{\beta}_k^+$ \\
+	\\
+	Propagation & $\hat{q}_{k+1}^- = \bar{\Omega}(\hat{\omega}_k^+) \hat{q}_k^+$ \\
+	 & $\bar{\Omega}_k^+ = \left[\begin{matrix}\cos(\frac{1}{2}||\hat{\omega}_k^+|| \Delta t) I_3 - [\hat{\Psi}_k^+ \times] & \hat{\Psi}_k^+ \\ -[\hat{\Psi}_k^+]^T & \cos(\frac{1}{2}||\hat{\omega}_k^+||\Delta t) \end{matrix}\right] $ \\
+	 & $\hat{\Psi}_k^+ = \frac{\sin(\frac{1}{2}||\hat{\omega}_k^+||\Delta t)\hat{\omega}_k^+}{||\hat{\omega}_k^+||}$ \\
+	 & $P_{k+1}^- = \Phi_k P_k^+ \Phi_k^T + \Gamma_k Q_k \Gamma_k^T$ \\
+	 & $\Phi_k = I_{6 \times 6} + \Delta t F_k$ \\
+	 & $F_k = \left[\begin{matrix}-[\hat{\omega}_k \times] & -I_{3 \times 3} \\ 0_{3 \times 3} & 0_{3 \times 3}\end{matrix}\right]$ \\
+	 & $\Gamma = \left[\begin{matrix} -I_{3 \times 3} & 0_{3 \times 3} \\ 0_{3 \times 3} & I_{3 \times 3}\end{matrix}\right]$ \\
+	\hline
+\end{tabular}
+\end{table}
+
+The implementation of the MEKF was not able to be tuned to the point where it was useful for control. Including the MEKF in the control loop destabilizes the system. While the attitude estimate tracks fairly well, a large jump in the estimated rates can be found during the initial transient of the MEKF. This jump clearly destabilizes the derivative term of the controller. It is likely that the issue causing this is an underlying bug in the code.
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=12cm]{images/pd_noise_mekf_attitude_lvlh}
+	\caption{MEKF Simulation}
+	\label{fig:mekf}
+\end{figure}
+
+\section{Conclusion}
+
+Due to the issues with the implementation of the MEKF, no meaningful comparisons can be made between the system controlled directly on the sensor readings an the filtered estimates.
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+\nocite{*}
 
 \end{document}
