@@ -429,12 +429,12 @@ fn mekf(x: &State, mekf_state: &MekfState, dt: f64) -> MekfState {
     let q_hat = mekf_state.q_hat;
     let b_hat = mekf_state.b_hat;
     let p = mekf_state.p;
-    let q_meas = x.q_b_lvlh_meas();
-    let w_meas = x.w_b_lvlh_meas();
+    let q_meas = x.q_b_lvlh_meas().conjugate();
+    let w_meas = x.w_b_lvlh_meas().conjugate();
     let r1 = SVector::<f64, 3>::new(1.0, 0.0, 0.0);
     let r2 = SVector::<f64, 3>::new(0.0, 0.0, 1.0);
-    let b1 = UnitQuaternion::from_quaternion(q_hat).to_rotation_matrix() * r1;
-    let b2 = UnitQuaternion::from_quaternion(q_hat).to_rotation_matrix() * r2;
+    let b1 = UnitQuaternion::from_quaternion(q_hat.conjugate()).to_rotation_matrix() * r1;
+    let b2 = UnitQuaternion::from_quaternion(q_hat.conjugate()).to_rotation_matrix() * r2;
     let big_r = 0.0000001 * SMatrix::<f64, 6, 6>::identity();
     let big_q = 0.0000001
         * SMatrix::<f64, 6, 6>::new(
@@ -495,8 +495,8 @@ fn mekf(x: &State, mekf_state: &MekfState, dt: f64) -> MekfState {
 
     // Update
     let p = (SMatrix::<f64, 6, 6>::identity() - k * big_h) * p;
-    let h1 = UnitQuaternion::from_quaternion(q_hat).to_rotation_matrix() * r1;
-    let h2 = UnitQuaternion::from_quaternion(q_hat).to_rotation_matrix() * r2;
+    let h1 = UnitQuaternion::from_quaternion(q_hat.conjugate()).to_rotation_matrix() * r1;
+    let h2 = UnitQuaternion::from_quaternion(q_hat.conjugate()).to_rotation_matrix() * r2;
     let h = SVector::<f64, 6>::new(h1[0], h1[1], h1[2], h2[0], h2[1], h2[2]);
     let y1 = UnitQuaternion::from_quaternion(q_meas).to_rotation_matrix() * r1;
     let y2 = UnitQuaternion::from_quaternion(q_meas).to_rotation_matrix() * r2;
